@@ -19,6 +19,8 @@ DEFAULT_GEMINI_TARGET = "https://gemini.google.com/"
 DEFAULT_GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_CLAUDE_TARGET = "https://claude.ai/"
 DEFAULT_CLAUDE_API = "https://api.anthropic.com/v1/models"
+DEFAULT_GITHUB_TARGET = "https://github.com/"
+DEFAULT_GITHUB_API = "https://api.github.com/"
 DEFAULT_IP_TARGETS = ("https://httpbin.org/ip", "https://api.ipify.org?format=json")
 DEFAULT_IP_INFO_TARGETS = ("https://ipinfo.io/{ip}/json", "https://ipwho.is/{ip}")
 
@@ -109,6 +111,13 @@ TARGET_PROFILES: Dict[str, TargetProfile] = {
         api_url=DEFAULT_CLAUDE_API,
         service_indicators=("claude", "anthropic", "__next"),
         use_cf_detection=True,
+    ),
+    "github": TargetProfile(
+        id="github",
+        name="GitHub 检测",
+        service_url=DEFAULT_GITHUB_TARGET,
+        api_url=DEFAULT_GITHUB_API,
+        service_indicators=("github.com", "GitHub", "github"),
     ),
 }
 

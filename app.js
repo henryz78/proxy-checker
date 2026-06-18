@@ -60,7 +60,8 @@ var targetProfiles=[
   {id:'openai',name:'OpenAI 检测',has_api:true,has_signup:false,has_cf_detection:true},
   {id:'grok',name:'Grok 检测',has_api:true,has_signup:false,has_cf_detection:true},
   {id:'gemini',name:'Gemini 检测',has_api:true,has_signup:false,has_cf_detection:false},
-  {id:'claude',name:'Claude 检测',has_api:true,has_signup:false,has_cf_detection:true}
+  {id:'claude',name:'Claude 检测',has_api:true,has_signup:false,has_cf_detection:true},
+  {id:'github',name:'GitHub 检测',has_api:true,has_signup:false,has_cf_detection:false}
 ];
 var currentTargetProfile=localStorage.getItem(TARGET_PROFILE_KEY)||'generic';
 
