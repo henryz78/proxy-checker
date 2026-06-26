@@ -1537,7 +1537,11 @@ def run_check(session_id, proxies, rounds=None, target_profile=None, max_concurr
     def publish_result(result):
         nonlocal valid_count
         if result:
-            if result.get("valid"):
+            if target_valid_count > 0 and valid_count >= target_valid_count:
+                stop_event.set()
+                return
+            is_valid = result.get("valid")
+            if is_valid:
                 valid_count += 1
             with sessions_lock:
                 s = sessions.get(session_id)

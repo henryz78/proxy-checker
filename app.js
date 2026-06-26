@@ -922,12 +922,138 @@ function copyValidProxies(){
 }
 function copyFailedProxies(){copyText(F.map(function(r){return r.proxy}).join("\n"));toast("已复制 "+F.length+" 个失效代理")}
 function clearValid(){
+  if(!V.length && !U.length){toast('有效代理列表已经是空的');return}
+  if(!confirm('确定清空所有有效/不稳定代理结果吗？'))return;
+  var dropdown = document.getElementById('validClearDropdown');
+  if(dropdown) dropdown.classList.remove('open');
   V=[];U=[];resetResultRenderLimits('valid');renderResultLists();
   updateStats();saveResults();toast('已清空有效代理');
 }
 function clearFailed(){
+  if(!F.length){toast('失效代理列表已经是空的');return}
+  if(!confirm('确定清空所有失效代理结果吗？'))return;
+  var dropdown = document.getElementById('failedClearDropdown');
+  if(dropdown) dropdown.classList.remove('open');
   F=[];resetResultRenderLimits('invalid');renderResultLists();
   updateStats();saveResults();toast('已清空失效代理');
+}
+
+function keepCurrentValidFilter(){
+  var all=V.concat(U);
+  if(!all.length){toast('有效代理列表已经是空的');return}
+  var filter=activeFilter('#vFilters');
+  if(filter==='all'){
+    toast('当前显示的是全部代理，无法进行过滤清除');
+    return;
+  }
+  var filterLabels={
+    'stable':'稳定',
+    'unstable':'不稳定',
+    'cf_bypass':'服务可达',
+    'api_or_ip':'出口IP/API可达',
+    'fast':'时延 <1秒',
+    'mid':'时延 1-3秒',
+    'slow':'时延 >3秒'
+  };
+  var label=filterLabels[filter]||filter;
+  var nextV=V.filter(function(item){return resultPassesValidFilter(item,filter)});
+  var nextU=U.filter(function(item){return resultPassesValidFilter(item,filter)});
+  var removed=(V.length+U.length)-(nextV.length+nextU.length);
+  if(!removed){toast('当前筛选已包含全部有效代理，无需清除');return}
+  if(!confirm('确定只保留【'+label+'】筛选的有效代理，清除其余 '+removed+' 个？'))return;
+  var dropdown = document.getElementById('validClearDropdown');
+  if(dropdown) dropdown.classList.remove('open');
+  V=nextV;U=nextU;
+  renderResultLists();
+  updateStats();
+  saveResults();
+  toast('已保留【'+label+'】，清除了其余 '+removed+' 个有效代理');
+}
+
+function clearCurrentValidFilter(){
+  var all=V.concat(U);
+  if(!all.length){toast('有效代理列表已经是空的');return}
+  var filter=activeFilter('#vFilters');
+  if(filter==='all'){
+    toast('当前显示的是全部代理，请选择具体筛选后再清空');
+    return;
+  }
+  var filterLabels={
+    'stable':'稳定',
+    'unstable':'不稳定',
+    'cf_bypass':'服务可达',
+    'api_or_ip':'出口IP/API可达',
+    'fast':'时延 <1秒',
+    'mid':'时延 1-3秒',
+    'slow':'时延 >3秒'
+  };
+  var label=filterLabels[filter]||filter;
+  var nextV=V.filter(function(item){return !resultPassesValidFilter(item,filter)});
+  var nextU=U.filter(function(item){return !resultPassesValidFilter(item,filter)});
+  var removed=(V.length+U.length)-(nextV.length+nextU.length);
+  if(!removed){toast('当前筛选【'+label+'】下没有有效代理，无需清除');return}
+  if(!confirm('确定清空【'+label+'】筛选的 '+removed+' 个有效代理，保留其余？'))return;
+  var dropdown = document.getElementById('validClearDropdown');
+  if(dropdown) dropdown.classList.remove('open');
+  V=nextV;U=nextU;
+  renderResultLists();
+  updateStats();
+  saveResults();
+  toast('已清空【'+label+'】筛选下的 '+removed+' 个有效代理');
+}
+
+function keepCurrentFailedFilter(){
+  if(!F.length){toast('失效代理列表已经是空的');return}
+  var filter=activeFilter('#fFilters');
+  if(filter==='all'){
+    toast('当前显示的是全部代理，无法进行过滤清除');
+    return;
+  }
+  var filterLabels={
+    'timeout':'超时',
+    'cf_block':'网页CF拦截',
+    'conn':'连接错误',
+    'other':'其他'
+  };
+  var label=filterLabels[filter]||filter;
+  var nextF=F.filter(function(item){return resultPassesInvalidFilter(item,filter)});
+  var removed=F.length-nextF.length;
+  if(!removed){toast('当前筛选已包含全部失效代理，无需清除');return}
+  if(!confirm('确定只保留【'+label+'】筛选的失效代理，清除其余 '+removed+' 个？'))return;
+  var dropdown = document.getElementById('failedClearDropdown');
+  if(dropdown) dropdown.classList.remove('open');
+  F=nextF;
+  renderResultLists();
+  updateStats();
+  saveResults();
+  toast('已保留【'+label+'】，清除了其余 '+removed+' 个失效代理');
+}
+
+function clearCurrentFailedFilter(){
+  if(!F.length){toast('失效代理列表已经是空的');return}
+  var filter=activeFilter('#fFilters');
+  if(filter==='all'){
+    toast('当前显示的是全部代理，请选择具体筛选后再清空');
+    return;
+  }
+  var filterLabels={
+    'timeout':'超时',
+    'cf_block':'网页CF拦截',
+    'conn':'连接错误',
+    'other':'其他'
+  };
+  var label=filterLabels[filter]||filter;
+  var nextF=F.filter(function(item){return !resultPassesInvalidFilter(item,filter)});
+  var removed=F.length-nextF.length;
+  if(!removed){toast('当前筛选【'+label+'】下没有失效代理，无需清除');return}
+  if(!confirm('确定清空【'+label+'】筛选的 '+removed+' 个失效代理，保留其余？'))return;
+  var dropdown = document.getElementById('failedClearDropdown');
+  if(dropdown) dropdown.classList.remove('open');
+  F=nextF;
+  renderResultLists();
+  updateStats();
+  saveResults();
+  toast('已清空【'+label+'】筛选下的 '+removed+' 个失效代理');
 }
 function clearAll(){
   var total=V.length+U.length+F.length;
@@ -2117,11 +2243,25 @@ function toggleRepoCloud(){
 function toggleRepoClear(){
   document.getElementById('repoClearDropdown').classList.toggle('open');
 }
+function toggleValidClear(){
+  document.getElementById('validClearDropdown').classList.toggle('open');
+}
+function toggleFailedClear(){
+  document.getElementById('failedClearDropdown').classList.toggle('open');
+}
 document.addEventListener('click',function(e){
   if(!e.target.closest('#repoIODropdown'))document.getElementById('repoIODropdown').classList.remove('open');
   if(!e.target.closest('#repoCloudDropdown'))document.getElementById('repoCloudDropdown').classList.remove('open');
   if(!e.target.closest('#repoClearDropdown')){
     var clearDropdown=document.getElementById('repoClearDropdown');
+    if(clearDropdown)clearDropdown.classList.remove('open');
+  }
+  if(!e.target.closest('#validClearDropdown')){
+    var clearDropdown=document.getElementById('validClearDropdown');
+    if(clearDropdown)clearDropdown.classList.remove('open');
+  }
+  if(!e.target.closest('#failedClearDropdown')){
+    var clearDropdown=document.getElementById('failedClearDropdown');
     if(clearDropdown)clearDropdown.classList.remove('open');
   }
 });

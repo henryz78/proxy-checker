@@ -315,7 +315,14 @@ textarea::-webkit-scrollbar-thumb:hover{background:rgba(124,92,252,.5)}
 <button class="fbtn" data-f="slow">⏳ &gt;3秒</button>
 </div>
 <div style="display:flex;gap:6px;align-items:center">
-<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px;color:#ef4444;border-color:rgba(239,68,68,.3)" onclick="clearValid()">&#129529; 清空</button>
+<div class="fetch-dropdown" id="validClearDropdown">
+<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px;color:#ef4444;border-color:rgba(239,68,68,.3)" onclick="toggleValidClear()">🗑️ 清空 ▼</button>
+<div class="fetch-menu" id="validClearMenu">
+<div class="fetch-menu-item menu-danger" onclick="keepCurrentValidFilter()">🧹 保留当前筛选，清除其他</div>
+<div class="fetch-menu-item menu-danger" onclick="clearCurrentValidFilter()">🗑️ 清空当前筛选</div>
+<div class="fetch-menu-item menu-danger" style="border-top:1px solid rgba(255,255,255,.08)" onclick="clearValid()">🧹 清空全部</div>
+</div>
+</div>
 <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="copyValidProxies()">📋 复制全部</button>
 <div class="grade-dropdown" id="gradeDropdown">
 <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="toggleGradeMenu()">📦 添加到我的仓库</button>
@@ -343,7 +350,14 @@ textarea::-webkit-scrollbar-thumb:hover{background:rgba(124,92,252,.5)}
 <button class="fbtn" data-f="other">❔ 其他</button>
 </div>
 <div style="display:flex;gap:6px;align-items:center">
-<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px;color:#ef4444;border-color:rgba(239,68,68,.3)" onclick="clearFailed()">&#129529; 清空</button>
+<div class="fetch-dropdown" id="failedClearDropdown">
+<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px;color:#ef4444;border-color:rgba(239,68,68,.3)" onclick="toggleFailedClear()">🗑️ 清空 ▼</button>
+<div class="fetch-menu" id="failedClearMenu">
+<div class="fetch-menu-item menu-danger" onclick="keepCurrentFailedFilter()">🧹 保留当前筛选，清除其他</div>
+<div class="fetch-menu-item menu-danger" onclick="clearCurrentFailedFilter()">🗑️ 清空当前筛选</div>
+<div class="fetch-menu-item menu-danger" style="border-top:1px solid rgba(255,255,255,.08)" onclick="clearFailed()">🧹 清空全部</div>
+</div>
+</div>
 <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="copyFailedProxies()">📋 复制全部</button>
 </div>
 </div>

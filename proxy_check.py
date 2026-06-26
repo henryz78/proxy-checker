@@ -1038,45 +1038,55 @@ def _has_service_content(profile: TargetProfile, response: object, cf_details: M
 
 
 def classify_ip_type(ip_info: Mapping[str, object]) -> str:
+    # 1. Check if security block explicitly identifies it as VPN, proxy, tor, relay, hosting, or anonymous
+    security = ip_info.get("security")
+    if isinstance(security, Mapping):
+        if (
+            security.get("vpn")
+            or security.get("proxy")
+            or security.get("tor")
+            or security.get("relay")
+            or security.get("anonymous")
+            or security.get("hosting")
+        ):
+            return "datacenter"
+
+    # 2. Check connection metadata for explicit hosting/datacenter types
+    connection = ip_info.get("connection")
+    if isinstance(connection, Mapping):
+        conn_type = str(connection.get("type") or "").lower()
+        if conn_type in ("hosting", "datacenter", "cdn", "business"):
+            return "datacenter"
+        if conn_type in ("residential", "isp", "cellular", "mobile"):
+            return "residential"
+
+    # 3. Check organization/ISP name for keywords (Datacenter / Hosting / Cloud / VPS / VPN / CDN)
     org = _ip_info_org(ip_info).lower()
     if not org:
         return "unknown"
+
     datacenter_keywords = (
-        "amazon",
-        "aws",
-        "google",
-        "cloudflare",
-        "azure",
-        "microsoft",
-        "digitalocean",
-        "linode",
-        "vultr",
-        "hetzner",
-        "ovh",
-        "oracle",
-        "alibaba",
-        "tencent",
-        "datacenter",
-        "hosting",
-        "server",
-        "cloud",
+        "amazon", "aws", "google", "cloudflare", "azure", "microsoft", "digitalocean", "linode", "vultr", "hetzner", "ovh", "oracle", "alibaba", "tencent", "datacenter", "hosting", "server", "cloud",
+        "leaseweb", "choopa", "zenlayer", "m247", "host", "servers", "telehouse", "quadranet", "cogent", "gtt", "colocation", "dedibox", "scalyr", "webhosting", "contabo", "interserver", "liquidweb",
+        "hostwinds", "scaleway", "i3d", "servers.com", "psychz", "multiplay", "path.net", "fastly", "akamai", "limelight", "stackpath", "imperva", "sucuri", "ddos-guard", "gcore", "hostinger",
+        "namecheap", "godaddy", "bluehost", "siteground", "dreamhost", "hostgator", "a2hosting", "wpengine", "pantheon", "kinsta", "flywheel", "shopify", "vercel", "netlify", "heroku", "render",
+        "fly.io", "railway", "supabase", "ovhcloud", "aliyun", "qcloud", "ucloud", "kingsoft", "baidu", "jdcloud", "huaweicloud", "ctyun", "ecloud", "vps", "vpn", "proxy", "tor", "relay"
     )
     if any(keyword in org for keyword in datacenter_keywords):
         return "datacenter"
+
+    # 4. Check for known residential keywords
     residential_keywords = (
-        "broadband",
-        "cable",
-        "communications",
-        "fiber",
-        "isp",
-        "mobile",
-        "telecom",
-        "telecommunications",
-        "wireless",
+        "broadband", "cable", "communications", "fiber", "isp", "mobile", "telecom", "telecommunications", "wireless",
+        "comcast", "charter", "shaw", "rogers", "bell", "telus", "at&t", "verizon", "t-mobile", "sprint", "orange",
+        "vodafone", "bt", "chinanet", "unicom", "cmnet", "dynamic", "pool", "dialup", "ftth", "dsl", "adsl", "consumer",
+        "residential", "home", "user", "telephony", "netvigator", "so-net", "hi-net"
     )
     if any(keyword in org for keyword in residential_keywords):
         return "residential"
-    return "unknown"
+
+    # 5. Default to residential (home broadband / mobile) if it survived all datacenter keywords/filters
+    return "residential"
 
 
 def _ip_info_org(ip_info: Mapping[str, object]) -> str:
