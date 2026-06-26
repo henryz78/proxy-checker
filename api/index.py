@@ -169,16 +169,22 @@ def is_request_authenticated():
 def unauthorized_response():
     return jsonify({"error": "请先输入登录密码", "auth_required": True}), 401
 
-def run_check(session_id, proxies, rounds=None, target_profile=None, max_concurrent=None):
+def run_check(session_id, proxies, rounds=None, target_profile=None, max_concurrent=None, target_valid_count=0):
     if rounds is None: rounds = CHECK_ROUNDS
     max_concurrent = normalize_max_concurrent(max_concurrent)
     with sessions_lock: sessions[session_id]["stop"] = threading.Event()
     stop_event = sessions[session_id]["stop"]
+    valid_count = 0
     def publish_result(result):
+        nonlocal valid_count
         if result:
+            if result.get("valid"):
+                valid_count += 1
             with sessions_lock:
                 s = sessions.get(session_id)
                 if s: s["results"].append(result); s["done"] += 1
+            if target_valid_count > 0 and valid_count >= target_valid_count:
+                stop_event.set()
     async def run_async():
         await check_engine.check_many_async(
             proxies=proxies,
@@ -260,10 +266,14 @@ def api_start():
     rounds = normalize_rounds(data.get("rounds", CHECK_ROUNDS))
     target_profile = normalize_target_profile(data.get("target_profile", "generic"))
     max_concurrent = normalize_max_concurrent(data.get("max_concurrent", MAX_CONCURRENT))
+    try:
+        target_valid_count = int(data.get("target_valid_count", 0))
+    except (TypeError, ValueError):
+        target_valid_count = 0
     sid = str(time.time()) + str(id(proxies))
     with sessions_lock:
-        sessions[sid] = {"results": [], "done": 0, "finished": False, "stop": None, "total": len(proxies), "created": time.time(), "rounds": rounds, "target_profile": target_profile, "max_concurrent": max_concurrent}
-    threading.Thread(target=run_check, args=(sid, proxies, rounds, target_profile, max_concurrent), daemon=True).start()
+        sessions[sid] = {"results": [], "done": 0, "finished": False, "stop": None, "total": len(proxies), "created": time.time(), "rounds": rounds, "target_profile": target_profile, "max_concurrent": max_concurrent, "target_valid_count": target_valid_count}
+    threading.Thread(target=run_check, args=(sid, proxies, rounds, target_profile, max_concurrent, target_valid_count), daemon=True).start()
     return jsonify({"session_id": sid, "total": len(proxies), "rounds": rounds, "target_profile": target_profile, "max_concurrent": max_concurrent})
 
 @app.route('/api/status', methods=['POST'])

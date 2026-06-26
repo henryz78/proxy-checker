@@ -494,7 +494,8 @@ function startCheck(options){
     statusText.textContent="正在提交...";
   }
   var targetProfile=options.targetProfile||currentTargetProfile;
-  post("/api/start",{proxies:toCheck,rounds:rounds,target_profile:targetProfile,max_concurrent:maxConcurrent,token:getUserToken()},function(err,res){
+  var targetValidCount=parseInt(document.getElementById('targetValidCount').value)||0;
+  post("/api/start",{proxies:toCheck,rounds:rounds,target_profile:targetProfile,max_concurrent:maxConcurrent,target_valid_count:targetValidCount,token:getUserToken()},function(err,res){
     if(err){toast(err);finishCheck(false);return}
     if(res&&res.auto_running){toast(res.error||'自动任务正在执行，请先停止自动任务');finishCheck(false);return}
     if(res&&res.error){toast(res.error);finishCheck(false);return}
@@ -518,6 +519,7 @@ function saveActiveSession(){
     target_profile:currentTargetProfile,
     rounds:getRoundsValue(),
     max_concurrent:getConcurrentValue(),
+    target_valid_count:parseInt(document.getElementById('targetValidCount').value)||0,
     total:totalCount,
     input:proxyInput.value,
     results_index:resultsIndex,
@@ -928,6 +930,10 @@ function clearFailed(){
   updateStats();saveResults();toast('已清空失效代理');
 }
 function clearAll(){
+  var total=V.length+U.length+F.length;
+  if(proxyInput.value || total > 0){
+    if(!confirm('确定清空输入框和所有检测结果？')) return;
+  }
   if(busy)stopCheck();
   proxyInput.value="";V=[];U=[];F=[];totalCount=0;sid=null;
   clearTimeout(resultsSaveTimer);resultsSaveTimer=null;
@@ -1869,6 +1875,9 @@ function restoreActiveSession(){
     concurrentInput.value=String(normalizeConcurrent(active.max_concurrent));
     localStorage.setItem(CONCURRENT_KEY,concurrentInput.value);
   }
+  if(active.target_valid_count!==undefined){
+    document.getElementById('targetValidCount').value=active.target_valid_count>0?String(active.target_valid_count):"";
+  }
   updateTargetProfileUI();
   busy=true;
   totalCount=active.total||V.length+U.length+F.length;
@@ -2210,6 +2219,80 @@ function clearRepoByGrade(grade){
 
 function clearRepo(){
   clearRepoByGrade('ALL');
+}
+
+function keepCurrentRepoFilter(){
+  var repo=loadRepo();
+  if(!repo.length){toast('仓库已经是空的');return}
+  var filter=activeFilter('#repoFilters');
+  if(filter==='all'){
+    toast('当前显示的是全部代理，无法进行过滤清除');
+    return;
+  }
+  var filterLabels={
+    'service':'服务可达',
+    'api':'API域名可达',
+    'cf':'网页CF未拦截',
+    'dc':'机房',
+    'res':'住宅',
+    'country':'有国家',
+    'grade_a':'等级A',
+    'grade_b':'等级B',
+    'grade_c':'等级C',
+    'grade_d':'等级D'
+  };
+  var label=filterLabels[filter]||filter;
+  var next=repo.filter(function(item){return repoPassesFilter(item,filter)});
+  var removed=repo.length-next.length;
+  if(!removed){toast('当前筛选已包含全部仓库代理，无需清除');return}
+  if(!confirm('确定只保留【'+label+'】分类的代理，清除其余 '+removed+' 个代理？此操作会同步云端仓库。'))return;
+  document.getElementById('repoClearDropdown').classList.remove('open');
+  var baseCount=getRepoBaseCount(repo);
+  saveRepo(next,{sync:false});
+  renderRepo();
+  syncRepoReplace(next,baseCount,function(err,res){
+    if(err){toast('清除同步失败: '+err);return}
+    if(res&&res.stale_repo)return;
+    updateCloudRepoCount();
+    toast('已保留【'+label+'】，清除了其余 '+removed+' 个代理');
+  });
+}
+
+function clearCurrentRepoFilter(){
+  var repo=loadRepo();
+  if(!repo.length){toast('仓库已经是空的');return}
+  var filter=activeFilter('#repoFilters');
+  if(filter==='all'){
+    toast('当前显示的是全部代理，请选择具体分类后再清空');
+    return;
+  }
+  var filterLabels={
+    'service':'服务可达',
+    'api':'API域名可达',
+    'cf':'网页CF未拦截',
+    'dc':'机房',
+    'res':'住宅',
+    'country':'有国家',
+    'grade_a':'等级A',
+    'grade_b':'等级B',
+    'grade_c':'等级C',
+    'grade_d':'等级D'
+  };
+  var label=filterLabels[filter]||filter;
+  var next=repo.filter(function(item){return !repoPassesFilter(item,filter)});
+  var removed=repo.length-next.length;
+  if(!removed){toast('当前筛选分类【'+label+'】下没有代理，无需清除');return}
+  if(!confirm('确定清空【'+label+'】分类的 '+removed+' 个代理，保留其余代理？此操作会同步云端仓库。'))return;
+  document.getElementById('repoClearDropdown').classList.remove('open');
+  var baseCount=getRepoBaseCount(repo);
+  saveRepo(next,{sync:false});
+  renderRepo();
+  syncRepoReplace(next,baseCount,function(err,res){
+    if(err){toast('清除同步失败: '+err);return}
+    if(res&&res.stale_repo)return;
+    updateCloudRepoCount();
+    toast('已清空【'+label+'】分类下的 '+removed+' 个代理');
+  });
 }
 
 function importRepoTxt(input){

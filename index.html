@@ -255,7 +255,7 @@ textarea::-webkit-scrollbar-thumb:hover{background:rgba(124,92,252,.5)}
 </select>
 <input id="concurrentInput" type="hidden" min="1" max="200" step="1" value="30">
 <button class="btn btn-ghost" onclick="dedup()">&#128260; 去重</button>
-<button class="btn btn-ghost" onclick="clearAll()">&#129529; 清空</button>
+<button class="btn btn-ghost" onclick="clearAll()">&#129529; 清空全部</button>
 <div class="fetch-dropdown" id="fetchDropdown">
 <button class="btn btn-ghost fetch-btn" id="fetchBtn" onclick="toggleFetchMenu()">&#128229; 拉取免费代理</button>
 <div class="fetch-menu" id="fetchMenu"></div>
@@ -263,6 +263,10 @@ textarea::-webkit-scrollbar-thumb:hover{background:rgba(124,92,252,.5)}
 <div class="fetch-dropdown" id="targetProfileDropdown">
 <button class="btn btn-ghost fetch-btn" id="targetProfileBtn" onclick="toggleTargetProfileMenu()">&#127919; 常规代理检测 &#9660;</button>
 <div class="fetch-menu" id="targetProfileMenu"></div>
+</div>
+<div class="inline-config" style="margin-left: 4px; margin-right: 4px;">
+<span style="font-size: 12px; color: #888;">可用数停止:</span>
+<input id="targetValidCount" type="number" min="0" placeholder="无限制" title="检测到指定数量的可用（稳定）代理后自动停止，0或留空表示不限制" style="width:75px;padding:0 8px;border-radius:8px;background:#0d0d1a;border:1px solid rgba(255,255,255,.1);color:#e0e0e0;font-size:13px;height:36px;min-height:36px;font-weight:600;text-align:center">
 </div>
 <button class="btn btn-ghost" onclick="openAppSettings()" title="检测轮次、并发、密码、超时和时区">&#9881;&#65039; 设置</button>
 <button class="btn btn-ghost" onclick="openRunLogs()" title="查看手动检测和自动任务的执行记录">&#128203; 日志</button>
@@ -375,6 +379,8 @@ textarea::-webkit-scrollbar-thumb:hover{background:rgba(124,92,252,.5)}
 <div class="fetch-menu-item menu-danger" onclick="clearRepoByGrade('B')">🏅 清空等级B</div>
 <div class="fetch-menu-item menu-danger" onclick="clearRepoByGrade('C')">🏅 清空等级C</div>
 <div class="fetch-menu-item menu-danger" onclick="clearRepoByGrade('D')">🏅 清空等级D</div>
+<div class="fetch-menu-item menu-danger" style="border-top:1px solid rgba(255,255,255,.08)" onclick="keepCurrentRepoFilter()">🧹 保留当前筛选，清除其他</div>
+<div class="fetch-menu-item menu-danger" onclick="clearCurrentRepoFilter()">🗑️ 清空当前筛选</div>
 <div class="fetch-menu-item menu-danger" onclick="clearRepoByGrade('ALL')">🧹 清空全部</div>
 </div>
 </div>

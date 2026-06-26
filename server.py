@@ -1522,7 +1522,7 @@ def run_deep_check(proxy_str, target_url=None):
 # ============================================================
 # Main Check Runner
 # ============================================================
-def run_check(session_id, proxies, rounds=None, target_profile=None, max_concurrent=None, token="default"):
+def run_check(session_id, proxies, rounds=None, target_profile=None, max_concurrent=None, token="default", target_valid_count=0):
     if rounds is None:
         rounds = CHECK_ROUNDS
     rounds = normalize_rounds(rounds)
@@ -1533,13 +1533,19 @@ def run_check(session_id, proxies, rounds=None, target_profile=None, max_concurr
         sessions[session_id]["stop"] = threading.Event()
     stop_event = sessions[session_id]["stop"]
 
+    valid_count = 0
     def publish_result(result):
+        nonlocal valid_count
         if result:
+            if result.get("valid"):
+                valid_count += 1
             with sessions_lock:
                 s = sessions.get(session_id)
                 if s:
                     s["results"].append(result)
                     s["done"] += 1
+            if target_valid_count > 0 and valid_count >= target_valid_count:
+                stop_event.set()
 
     async def run_async():
         await check_engine.check_many_async(
@@ -1757,6 +1763,10 @@ class Handler(SimpleHTTPRequestHandler):
                 target_profile = normalize_target_profile(body.get("target_profile", "generic"))
                 max_concurrent = normalize_max_concurrent(body.get("max_concurrent", MAX_CONCURRENT))
                 token = sanitize_token(body.get("token", ""))
+                try:
+                    target_valid_count = int(body.get("target_valid_count", 0))
+                except (TypeError, ValueError):
+                    target_valid_count = 0
                 if body.get("token") and is_auto_running(token):
                     self._json(200, {"error": "自动任务正在执行，请先停止自动任务", "auto_running": True})
                     return
@@ -1780,10 +1790,10 @@ class Handler(SimpleHTTPRequestHandler):
                         "stop": None, "total": len(proxies), "created": time.time(),
                         "rounds": rounds, "target_profile": target_profile,
                         "max_concurrent": max_concurrent, "token": token,
-                        "log_id": log_id,
+                        "log_id": log_id, "target_valid_count": target_valid_count,
                     }
-                threading.Thread(target=run_check, args=(sid, proxies, rounds, target_profile, max_concurrent, token), daemon=True).start()
-                log.info(f"Start check: session={sid}, proxies={len(proxies)}, rounds={rounds}, target_profile={target_profile}, max_concurrent={max_concurrent}")
+                threading.Thread(target=run_check, args=(sid, proxies, rounds, target_profile, max_concurrent, token, target_valid_count), daemon=True).start()
+                log.info(f"Start check: session={sid}, proxies={len(proxies)}, rounds={rounds}, target_profile={target_profile}, max_concurrent={max_concurrent}, target_valid_count={target_valid_count}")
                 self._json(200, {"session_id": sid, "total": len(proxies), "rounds": rounds, "target_profile": target_profile, "max_concurrent": max_concurrent})
 
             elif self.path == "/api/status":
