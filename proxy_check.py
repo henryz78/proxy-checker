@@ -24,7 +24,11 @@ DEFAULT_GITHUB_API = "https://api.github.com/"
 DEFAULT_GITLAB_TARGET = "https://gitlab.com/"
 DEFAULT_GITLAB_API = "https://gitlab.com/api/v4/user"
 DEFAULT_IP_TARGETS = ("https://httpbin.org/ip", "https://api.ipify.org?format=json")
-DEFAULT_IP_INFO_TARGETS = ("https://ipinfo.io/{ip}/json", "https://ipwho.is/{ip}")
+DEFAULT_IP_INFO_TARGETS = (
+    "http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,isp,org,as,query,hosting,proxy",
+    "https://ipwho.is/{ip}",
+    "https://ipinfo.io/{ip}/json"
+)
 
 CF_BODY_INDICATORS = (
     "challenge-platform",
@@ -830,13 +834,13 @@ def _apply_ip_info_response(result: RoundResult, response: object, source: str) 
             "error": "IP信息格式错误",
         }
         return None
-    if ip_info.get("success") is False:
+    if ip_info.get("success") is False or ip_info.get("status") == "fail":
         result.ip_type = "unknown"
         result.checks_detail["ip_info"] = {
             "ip": result.ip,
             "type": result.ip_type,
             "source": source,
-            "error": _string_value(ip_info.get("message")) or "IP信息查询失败",
+            "error": _string_value(ip_info.get("message")) or _string_value(ip_info.get("status")) or "IP信息查询失败",
         }
         return None
     org = _ip_info_org(ip_info)
@@ -1038,6 +1042,10 @@ def _has_service_content(profile: TargetProfile, response: object, cf_details: M
 
 
 def classify_ip_type(ip_info: Mapping[str, object]) -> str:
+    # 0. Check if ip-api.com explicitly flags hosting/proxy
+    if ip_info.get("hosting") is True or ip_info.get("proxy") is True:
+        return "datacenter"
+
     # 1. Check if security block explicitly identifies it as VPN, proxy, tor, relay, hosting, or anonymous
     security = ip_info.get("security")
     if isinstance(security, Mapping):
@@ -1099,7 +1107,11 @@ def _ip_info_org(ip_info: Mapping[str, object]) -> str:
 
 
 def _ip_info_country(ip_info: Mapping[str, object]) -> str:
-    return _string_value(ip_info.get("country_code")) or _string_value(ip_info.get("country"))
+    return (
+        _string_value(ip_info.get("country_code"))
+        or _string_value(ip_info.get("countryCode"))
+        or _string_value(ip_info.get("country"))
+    )
 
 
 def _build_public_result(
