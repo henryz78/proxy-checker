@@ -21,6 +21,8 @@ DEFAULT_CLAUDE_TARGET = "https://claude.ai/"
 DEFAULT_CLAUDE_API = "https://api.anthropic.com/v1/models"
 DEFAULT_GITHUB_TARGET = "https://github.com/"
 DEFAULT_GITHUB_API = "https://api.github.com/"
+DEFAULT_GITLAB_TARGET = "https://gitlab.com/"
+DEFAULT_GITLAB_API = "https://gitlab.com/api/v4/user"
 DEFAULT_IP_TARGETS = ("https://httpbin.org/ip", "https://api.ipify.org?format=json")
 DEFAULT_IP_INFO_TARGETS = ("https://ipinfo.io/{ip}/json", "https://ipwho.is/{ip}")
 
@@ -118,6 +120,13 @@ TARGET_PROFILES: Dict[str, TargetProfile] = {
         service_url=DEFAULT_GITHUB_TARGET,
         api_url=DEFAULT_GITHUB_API,
         service_indicators=("github.com", "GitHub", "github"),
+    ),
+    "gitlab": TargetProfile(
+        id="gitlab",
+        name="GitLab 检测",
+        service_url=DEFAULT_GITLAB_TARGET,
+        api_url=DEFAULT_GITLAB_API,
+        service_indicators=("gitlab.com", "GitLab", "gitlab"),
     ),
 }
 
