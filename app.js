@@ -1247,6 +1247,7 @@ function compactRepoItem(p){
   if(p.fraud_flags)item.fraud_flags=p.fraud_flags;
   if(p.blacklist_count!==undefined&&p.blacklist_count!==null)item.blacklist_count=p.blacklist_count;
   if(p.checks_detail)item.checks_detail=p.checks_detail;
+  if(p.cf_indicators)item.cf_indicators=p.cf_indicators;
   if(p.service_reachable===true)item.service_reachable=true;
   if(p.api_reachable===true)item.api_reachable=true;
   if(p.cf_bypass)item.cf_bypass=true;
@@ -2183,7 +2184,38 @@ function renderRepo(){
     var lat=p.latency?p.latency+'ms':'-';
     var spd=p.latency?(p.latency<1000?"speed-fast":p.latency<3000?"speed-mid":"speed-slow"):"";
     var country=p.country?String(p.country).toUpperCase():'';
-    html+='<div class="proxy-item valid" data-lat="'+(p.latency||99999)+'" data-grade="'+g+'" data-service="'+(p.service_reachable===true?"y":"n")+'" data-api="'+(p.api_reachable===true?"y":"n")+'" data-cf="'+(p.cf_bypass?"y":"n")+'" data-ip-type="'+(p.ip_type||"")+'" data-country="'+(country?"y":"n")+'">'+
+
+    var detailId='repo_detail_'+Math.random().toString(36).substr(2,8);
+    var detailHTML='';
+    if(p.checks_detail && Object.keys(p.checks_detail).length>0){
+      var d=p.checks_detail;
+      var rows='';
+      if(d.service) rows+='<div class="detail-row"><span class="detail-key">服务:</span><span>'+(d.service.status||'-')+' '+(d.service.reachable?'<span style="color:#22c55e">可达</span>':'<span style="color:#ef4444">不可达</span>')+(d.service.cf_detected?' <span style="color:#ef4444">CF:'+esc(d.service.cf_type||'detected')+'</span>':'')+'</span></div>';
+      else if(d.chat) rows+='<div class="detail-row"><span class="detail-key">首页:</span><span>'+(d.chat.status||'-')+(d.chat.cf_detected?' <span style="color:#ef4444">CF:'+esc(d.chat.cf_type||'detected')+'</span>':'')+'</span></div>';
+      if(d.api) rows+='<div class="detail-row"><span class="detail-key">API域名:</span><span>'+(d.api.status||'-')+' '+(d.api.reachable?'<span style="color:#22c55e">可达</span>':'<span style="color:#ef4444">不可达</span>')+'</span></div>';
+      if(d.ip_info) {
+        var riskText = '';
+        if(d.ip_info.fraud_score!==undefined) {
+          var score = d.ip_info.fraud_score;
+          var rLevel = d.ip_info.risk_level || 'clean';
+          var rColor = score >= 70 ? '#ef4444' : score >= 40 ? '#f59e0b' : score >= 20 ? '#3b82f6' : '#22c55e';
+          riskText = ' <span style="color:'+rColor+';font-weight:bold">（风控值: '+score+'，风险: '+esc(rLevel)+'）</span>';
+          if (d.ip_info.fraud_flags && d.ip_info.fraud_flags.length > 0) {
+            riskText += ' <span style="color:#aaa;font-size:10px">['+esc(d.ip_info.fraud_flags.join(', '))+']</span>';
+          }
+          if (d.ip_info.blacklist_count > 0) {
+            riskText += ' <span style="color:#ef4444;font-size:10px">(黑名单: '+d.ip_info.blacklist_count+')</span>';
+          }
+        }
+        rows+='<div class="detail-row"><span class="detail-key">IP信息:</span><span>'+esc(d.ip_info.org||'')+' ('+esc(d.ip_info.country||'')+')'+riskText+'</span></div>';
+      }
+      if(p.cf_indicators && p.cf_indicators.length>0) rows+='<div class="detail-row"><span class="detail-key">CF特征:</span><span style="color:#ef4444">'+esc(p.cf_indicators.join(', '))+'</span></div>';
+      detailHTML='<div class="detail-panel" id="'+detailId+'">'+rows+'</div>';
+    }
+
+    var typeClass=g==='D'?'unstable':g==='F'?'invalid':'valid';
+
+    html+='<div class="proxy-item '+typeClass+'" data-lat="'+(p.latency||99999)+'" data-grade="'+g+'" data-service="'+(p.service_reachable===true?"y":"n")+'" data-api="'+(p.api_reachable===true?"y":"n")+'" data-cf="'+(p.cf_bypass?"y":"n")+'" data-ip-type="'+(p.ip_type||"")+'" data-country="'+(country?"y":"n")+'" onclick="toggleDetail(\''+detailId+'\')">'+
       '<div style="flex:1;min-width:0">'+
       '<div class="proxy-addr">'+esc(p.proxy)+'</div>'+
       '<div class="proxy-meta">'+
@@ -2199,10 +2231,12 @@ function renderRepo(){
        p.ip_type==='proxy'?tagHTML('tag-proxy','代理',getIpTypeTitle(p.ip_type)):
        p.ip_type==='tor'?tagHTML('tag-tor','Tor',getIpTypeTitle(p.ip_type)):'')+
       (p.cf_bypass?tagHTML('tag-cf','网页CF未拦截',tagTitle('cf_ok')):'')+
-      '</div></div>'+
+      '</div>'+
+      detailHTML+
+      '</div>'+
       '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">'+
       (p.latency?tagHTML('tag-lat','<span class="speed-dot '+spd+'"></span>'+esc(lat),tagTitle('latency')):'')+
-      tagHTML('tag-ok',esc(gradeLabels[g]||''),getFinalBadgeTitle(g,g==='D'?'unstable':g==='F'?'invalid':'valid'))+
+      tagHTML('tag-ok',esc(gradeLabels[g]||''),getFinalBadgeTitle(g,typeClass))+
       '<button class="copy-btn" style="opacity:0.6" onclick="event.stopPropagation();clip(this)" data-p="'+esc(p.proxy)+'">📋 复制</button>'+
       '<button class="copy-btn" style="opacity:0.6;color:#ef4444" onclick="event.stopPropagation();removeFromRepo('+i+')">🗑 删除</button>'+
       '</div></div>';
