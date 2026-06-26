@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import socket
+import re
+import urllib.parse
 import statistics
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
 
 from curl_cffi import requests as cffi_requests
 
@@ -173,6 +176,11 @@ class IpInfoSummary:
     org: str
     country: str
     ip_type: str
+    fraud_score: int = 0
+    clean_score: int = 100
+    risk_level: str = "clean"
+    fraud_flags: Tuple[str, ...] = ()
+    blacklist_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -199,6 +207,11 @@ class RoundResult:
     registration_ready: bool = False
     registration_detail: Optional[str] = None
     checks_detail: Dict[str, object] = field(default_factory=dict)
+    fraud_score: Optional[int] = None
+    clean_score: Optional[int] = None
+    risk_level: Optional[str] = None
+    fraud_flags: List[str] = field(default_factory=list)
+    blacklist_count: int = 0
 
     @classmethod
     def stopped(cls) -> "RoundResult":
@@ -658,25 +671,34 @@ class ProxyCheckEngine:
         if cached is not None:
             _apply_ip_info_summary(result, cached, True)
             return
-        for ip_info_target in self.config.ip_info_targets:
+
+        ip = result.ip
+
+        def fetch_json(url):
             try:
-                response = cffi_requests.get(
-                    ip_info_target.format(ip=result.ip),
-                    timeout=5,
-                    impersonate=self.config.impersonate,
-                )
-                summary = _apply_ip_info_response(result, response, ip_info_target)
-                if summary is not None:
-                    self.ip_info_cache.set(summary)
-                    return
-            except Exception as exc:
-                result.ip_type = "unknown"
-                result.checks_detail["ip_info"] = {
-                    "ip": result.ip,
-                    "type": result.ip_type,
-                    "source": ip_info_target,
-                    "error": classify_error(str(exc)),
-                }
+                response = cffi_requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, dict):
+                        return data
+            except Exception:
+                pass
+            return None
+
+        ip_api_url = f"http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,isp,org,as,query,hosting,proxy,mobile"
+        ipwhois_url = f"https://ipwho.is/{ip}"
+        proxycheck_url = f"http://proxycheck.io/v2/{ip}?vpn=1&risk=1&asn=1"
+
+        ip_api_res = fetch_json(ip_api_url)
+        ipwhois_res = fetch_json(ipwhois_url)
+        proxycheck_res = fetch_json(proxycheck_url)
+        blacklist = dnsbl_hits_sync(ip)
+
+        summary = _build_risk_profile_from_data(
+            ip, ip_api_res, ipwhois_res, proxycheck_res, blacklist
+        )
+        self.ip_info_cache.set(summary)
+        _apply_ip_info_summary(result, summary, False)
 
     async def _probe_ip_info_async(
         self,
@@ -689,24 +711,38 @@ class ProxyCheckEngine:
         if cached is not None:
             _apply_ip_info_summary(result, cached, True)
             return
-        for ip_info_target in self.config.ip_info_targets:
+
+        ip = result.ip
+
+        async def fetch_json(url):
             try:
-                response = await session.get(
-                    ip_info_target.format(ip=result.ip),
-                    timeout=5,
-                )
-                summary = _apply_ip_info_response(result, response, ip_info_target)
-                if summary is not None:
-                    self.ip_info_cache.set(summary)
-                    return
-            except Exception as exc:
-                result.ip_type = "unknown"
-                result.checks_detail["ip_info"] = {
-                    "ip": result.ip,
-                    "type": result.ip_type,
-                    "source": ip_info_target,
-                    "error": classify_error(str(exc)),
-                }
+                response = await session.get(url, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, dict):
+                        return data
+            except Exception:
+                pass
+            return None
+
+        ip_api_url = f"http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,isp,org,as,query,hosting,proxy,mobile"
+        ipwhois_url = f"https://ipwho.is/{ip}"
+        proxycheck_url = f"http://proxycheck.io/v2/{ip}?vpn=1&risk=1&asn=1"
+
+        ip_api_task = fetch_json(ip_api_url)
+        ipwhois_task = fetch_json(ipwhois_url)
+        proxycheck_task = fetch_json(proxycheck_url)
+        dnsbl_task = dnsbl_hits_async(ip)
+
+        ip_api_res, ipwhois_res, proxycheck_res, blacklist = await asyncio.gather(
+            ip_api_task, ipwhois_task, proxycheck_task, dnsbl_task
+        )
+
+        summary = _build_risk_profile_from_data(
+            ip, ip_api_res, ipwhois_res, proxycheck_res, blacklist
+        )
+        self.ip_info_cache.set(summary)
+        _apply_ip_info_summary(result, summary, False)
 
     def _has_protocol(self, proxy_input: str) -> bool:
         return proxy_input.startswith(self.config.protocol_prefixes)
@@ -859,11 +895,21 @@ def _apply_ip_info_response(result: RoundResult, response: object, source: str) 
 def _apply_ip_info_summary(result: RoundResult, summary: IpInfoSummary, cached: bool) -> None:
     result.country = summary.country
     result.ip_type = summary.ip_type
+    result.fraud_score = summary.fraud_score
+    result.clean_score = summary.clean_score
+    result.risk_level = summary.risk_level
+    result.fraud_flags = list(summary.fraud_flags)
+    result.blacklist_count = summary.blacklist_count
     result.checks_detail["ip_info"] = {
         "ip": summary.ip,
         "org": summary.org,
         "country": summary.country,
         "type": result.ip_type,
+        "fraud_score": summary.fraud_score,
+        "clean_score": summary.clean_score,
+        "risk_level": summary.risk_level,
+        "fraud_flags": list(summary.fraud_flags),
+        "blacklist_count": summary.blacklist_count,
         "cached": cached,
     }
 
@@ -1041,69 +1087,202 @@ def _has_service_content(profile: TargetProfile, response: object, cf_details: M
     return False
 
 
-def classify_ip_type(ip_info: Mapping[str, object]) -> str:
-    # 0. Check if ip-api.com explicitly flags hosting/proxy
-    if ip_info.get("hosting") is True or ip_info.get("proxy") is True:
-        return "datacenter"
+SUSPICIOUS_ASN_KEYWORDS = {
+    "hosting", "host", "cloud", "vps", "server", "servers", "data center", "datacenter",
+    "colo", "colocation", "dedicated", "virtual", "vpn", "proxy", "relay", "tor", "privacy",
+    "digitalocean", "hetzner", "ovh", "aws", "amazon", "google cloud", "microsoft", "azure",
+    "oracle", "linode", "akamai", "vultr", "contabo", "leaseweb", "m247", "choopa",
+    "quadranet", "colo cross", "cogent", "sharktech", "psychz", "dedipath", "gcore",
+}
 
-    # 1. Check if security block explicitly identifies it as VPN, proxy, tor, relay, hosting, or anonymous
-    security = ip_info.get("security")
-    if isinstance(security, Mapping):
-        if (
-            security.get("vpn")
-            or security.get("proxy")
-            or security.get("tor")
-            or security.get("relay")
-            or security.get("anonymous")
-            or security.get("hosting")
-        ):
-            return "datacenter"
+DNSBL_ZONES = [
+    "zen.spamhaus.org",
+    "bl.spamcop.net",
+    "dnsbl.sorbs.net",
+    "all.s5h.net",
+]
 
-    # 2. Check connection metadata for explicit hosting/datacenter types
-    connection = ip_info.get("connection")
-    if isinstance(connection, Mapping):
-        conn_type = str(connection.get("type") or "").lower()
-        if conn_type in ("hosting", "datacenter", "cdn", "business"):
-            return "datacenter"
-        if conn_type in ("residential", "isp", "cellular", "mobile"):
-            return "residential"
+def parse_asn_number(value: Any) -> str:
+    text = str(value or "")
+    match = re.search(r"AS\s*([0-9]+)", text, re.I)
+    if match:
+        return "AS" + match.group(1)
+    match = re.search(r"\b([0-9]{2,})\b", text)
+    return "AS" + match.group(1) if match else ""
 
-    # 3. Check organization/ISP name for keywords (Datacenter / Hosting / Cloud / VPS / VPN / CDN)
-    org = _ip_info_org(ip_info).lower()
-    if not org:
-        return "unknown"
+def _dnsbl_check_sync(reversed_ip: str, zone: str) -> Optional[str]:
+    try:
+        query = f"{reversed_ip}.{zone}"
+        socket.gethostbyname(query)
+        return zone
+    except Exception:
+        return None
 
-    datacenter_keywords = (
-        "amazon", "aws", "google", "cloudflare", "azure", "microsoft", "digitalocean", "linode", "vultr", "hetzner", "ovh", "oracle", "alibaba", "tencent", "datacenter", "hosting", "server", "cloud",
-        "leaseweb", "choopa", "zenlayer", "m247", "host", "servers", "telehouse", "quadranet", "cogent", "gtt", "colocation", "dedibox", "scalyr", "webhosting", "contabo", "interserver", "liquidweb",
-        "hostwinds", "scaleway", "i3d", "servers.com", "psychz", "multiplay", "path.net", "fastly", "akamai", "limelight", "stackpath", "imperva", "sucuri", "ddos-guard", "gcore", "hostinger",
-        "namecheap", "godaddy", "bluehost", "siteground", "dreamhost", "hostgator", "a2hosting", "wpengine", "pantheon", "kinsta", "flywheel", "shopify", "vercel", "netlify", "heroku", "render",
-        "fly.io", "railway", "supabase", "ovhcloud", "aliyun", "qcloud", "ucloud", "kingsoft", "baidu", "jdcloud", "huaweicloud", "ctyun", "ecloud", "vps", "vpn", "proxy", "tor", "relay"
+async def dnsbl_hits_async(ip: str) -> List[str]:
+    try:
+        socket.inet_aton(ip)
+    except OSError:
+        return []
+    reversed_ip = ".".join(reversed(ip.split(".")))
+    loop = asyncio.get_running_loop()
+    tasks = []
+    for zone in DNSBL_ZONES:
+        task = loop.run_in_executor(None, _dnsbl_check_sync, reversed_ip, zone)
+        tasks.append(task)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return [r for r in results if isinstance(r, str)]
+
+def dnsbl_hits_sync(ip: str) -> List[str]:
+    try:
+        socket.inet_aton(ip)
+    except OSError:
+        return []
+    reversed_ip = ".".join(reversed(ip.split(".")))
+    hits = []
+    for zone in DNSBL_ZONES:
+        res = _dnsbl_check_sync(reversed_ip, zone)
+        if res:
+            hits.append(res)
+    return hits
+
+def _build_risk_profile_from_data(
+    ip: str,
+    ip_api_res: Optional[Mapping[str, Any]],
+    ipwhois_res: Optional[Mapping[str, Any]],
+    proxycheck_res: Optional[Mapping[str, Any]],
+    blacklist: List[str]
+) -> IpInfoSummary:
+    flags: List[str] = []
+    sources: List[str] = []
+    owner = ""
+    asn = ""
+    as_name = ""
+    location = ""
+    proxy = False
+    hosting = False
+    mobile = False
+    vpn = False
+    tor = False
+    external_risks: List[int] = []
+
+    if ip_api_res and ip_api_res.get("status") == "success":
+        sources.append("ip-api.com")
+        owner = ip_api_res.get("org") or ip_api_res.get("isp") or owner
+        asn = ip_api_res.get("as") or asn
+        as_name = ip_api_res.get("asname") or as_name
+        location = " ".join(part for part in [ip_api_res.get("country"), ip_api_res.get("regionName"), ip_api_res.get("city")] if part)
+        proxy = proxy or bool(ip_api_res.get("proxy"))
+        hosting = hosting or bool(ip_api_res.get("hosting"))
+        mobile = mobile or bool(ip_api_res.get("mobile"))
+
+    if ipwhois_res and ipwhois_res.get("success") is True:
+        sources.append("ipwho.is")
+        connection = ipwhois_res.get("connection") or {}
+        security = ipwhois_res.get("security") or {}
+        loc = " ".join(str(x) for x in [ipwhois_res.get("country"), ipwhois_res.get("region"), ipwhois_res.get("city")] if x)
+        owner = owner or connection.get("isp") or connection.get("org") or ""
+        asn = asn or parse_asn_number(connection.get("asn"))
+        as_name = as_name or connection.get("org") or connection.get("isp") or ""
+        location = location or loc
+        proxy = proxy or bool(security.get("proxy") or security.get("anonymous"))
+        hosting = hosting or bool(security.get("hosting"))
+        vpn = vpn or bool(security.get("vpn"))
+        tor = tor or bool(security.get("tor"))
+
+    if proxycheck_res:
+        item = proxycheck_res.get(ip) if isinstance(proxycheck_res, dict) else None
+        if isinstance(item, dict):
+            sources.append("proxycheck.io")
+            owner = owner or item.get("provider") or item.get("organisation") or ""
+            asn = asn or parse_asn_number(item.get("asn"))
+            as_name = as_name or item.get("provider") or item.get("organisation") or ""
+            proxy_yes = str(item.get("proxy", "")).lower() == "yes"
+            type_text = str(item.get("type") or "").lower()
+            proxy = proxy or proxy_yes
+            vpn = vpn or (proxy_yes and "vpn" in type_text)
+            tor = tor or (proxy_yes and "tor" in type_text)
+            hosting = hosting or any(k in type_text for k in ["hosting", "server", "datacenter", "data center"])
+            risk_raw = item.get("risk")
+            try:
+                risk = int(float(risk_raw))
+                if risk > 0:
+                    external_risks.append(risk)
+            except Exception:
+                pass
+
+    text_blob = " ".join([owner, as_name, asn]).lower()
+    suspicious_asn = any(k in text_blob for k in SUSPICIOUS_ASN_KEYWORDS)
+
+    score = 0
+    if tor:
+        score += 80
+        flags.append("tor_exit")
+    if proxy:
+        score += 55
+        flags.append("proxy_flag")
+    if vpn:
+        score += 45
+        flags.append("vpn_flag")
+    if hosting:
+        score += 38
+        flags.append("hosting_datacenter")
+    if suspicious_asn:
+        score += 25
+        flags.append("suspicious_asn_keyword")
+    if mobile:
+        score += 8
+        flags.append("mobile_network")
+    if blacklist:
+        score += min(65, 30 + 12 * (len(blacklist) - 1))
+        flags.append("dnsbl_blacklist")
+    if external_risks:
+        score += max(external_risks) // 2
+        flags.append("third_party_risk_score")
+
+    score = max(0, min(100, score))
+    clean_score = max(0, 100 - score)
+
+    if blacklist or tor or score >= 70:
+        risk_level = "high"
+    elif score >= 40:
+        risk_level = "medium"
+    elif score >= 20:
+        risk_level = "low"
+    else:
+        risk_level = "clean"
+
+    if tor:
+        ip_type = "tor"
+    elif proxy or vpn:
+        ip_type = "proxy"
+    elif hosting or suspicious_asn:
+        ip_type = "hosting"
+    elif mobile:
+        ip_type = "mobile"
+    else:
+        ip_type = "residential"
+
+    country = ""
+    if location:
+        country = _ip_info_country({"country": location})
+    if not country and ip_api_res:
+        country = _ip_info_country(ip_api_res)
+    if not country and ipwhois_res:
+        country = _ip_info_country(ipwhois_res)
+
+    org = owner or as_name or ""
+
+    return IpInfoSummary(
+        ip=ip,
+        org=org,
+        country=country,
+        ip_type=ip_type,
+        fraud_score=score,
+        clean_score=clean_score,
+        risk_level=risk_level,
+        fraud_flags=tuple(flags),
+        blacklist_count=len(blacklist),
     )
-    if any(keyword in org for keyword in datacenter_keywords):
-        return "datacenter"
-
-    # 4. Check for known residential keywords
-    residential_keywords = (
-        "broadband", "cable", "communications", "fiber", "isp", "mobile", "telecom", "telecommunications", "wireless",
-        "comcast", "charter", "shaw", "rogers", "bell", "telus", "at&t", "verizon", "t-mobile", "sprint", "orange",
-        "vodafone", "bt", "chinanet", "unicom", "cmnet", "dynamic", "pool", "dialup", "ftth", "dsl", "adsl", "consumer",
-        "residential", "home", "user", "telephony", "netvigator", "so-net", "hi-net"
-    )
-    if any(keyword in org for keyword in residential_keywords):
-        return "residential"
-
-    # 5. Default to residential (home broadband / mobile) if it survived all datacenter keywords/filters
-    return "residential"
-
-
-def _ip_info_org(ip_info: Mapping[str, object]) -> str:
-    connection = ip_info.get("connection")
-    if isinstance(connection, Mapping):
-        nested_org = _string_value(connection.get("org")) or _string_value(connection.get("isp"))
-        if nested_org:
-            return nested_org
-    return _string_value(ip_info.get("org")) or _string_value(ip_info.get("isp"))
 
 
 def _ip_info_country(ip_info: Mapping[str, object]) -> str:
@@ -1159,6 +1338,11 @@ def _build_public_result(
         "target_name": profile.name,
         "timestamp": time.time(),
         "checks_detail": checks_detail,
+        "fraud_score": result.fraud_score,
+        "clean_score": result.clean_score,
+        "risk_level": result.risk_level,
+        "fraud_flags": result.fraud_flags,
+        "blacklist_count": result.blacklist_count,
     }
 
 

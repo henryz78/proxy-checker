@@ -768,8 +768,11 @@ function getFinalBadgeTitle(grade,state){
 }
 
 function getIpTypeTitle(type){
-  if(type==='datacenter')return '机房 IP，通常来自云服务器或数据中心，速度可能好，但更容易被风控。';
+  if(type==='datacenter'||type==='hosting')return '机房 IP，通常来自云服务器或数据中心，速度可能好，但更容易被风控。';
   if(type==='residential')return '住宅 IP，通常更像普通家庭宽带，可能更容易通过风控，但稳定性不保证。';
+  if(type==='mobile')return '移动 IP，来自移动蜂窝网络（基站信号），质量与住宅 IP 相当。';
+  if(type==='proxy')return '代理 IP，检测到明显的代理或 VPN 出口，风险较高。';
+  if(type==='tor')return 'Tor 节点出口，洋葱路由器节点，风控拦截率极高。';
   return '查到了出口 IP，但暂时无法判断它是机房、住宅还是其它类型。';
 }
 
@@ -827,8 +830,11 @@ function itemHTML(r,type){
   var countryTag=country?tagHTML('tag-country','国家: '+esc(country),tagTitle('country')):'';
   // IP type tag
   var ipTypeTag='';
-  if(r.ip_type==='datacenter') ipTypeTag=tagHTML('tag-dc','机房',getIpTypeTitle(r.ip_type));
+  if(r.ip_type==='datacenter'||r.ip_type==='hosting') ipTypeTag=tagHTML('tag-dc','机房',getIpTypeTitle(r.ip_type));
   else if(r.ip_type==='residential') ipTypeTag=tagHTML('tag-res','住宅',getIpTypeTitle(r.ip_type));
+  else if(r.ip_type==='mobile') ipTypeTag=tagHTML('tag-mobile','移动',getIpTypeTitle(r.ip_type));
+  else if(r.ip_type==='proxy') ipTypeTag=tagHTML('tag-proxy','代理',getIpTypeTitle(r.ip_type));
+  else if(r.ip_type==='tor') ipTypeTag=tagHTML('tag-tor','Tor',getIpTypeTitle(r.ip_type));
   else if(r.ip) ipTypeTag=tagHTML('','类型未知',getIpTypeTitle(r.ip_type),'background:rgba(255,255,255,.06);color:#666');
 
   // CF bypass tag
@@ -869,7 +875,22 @@ function itemHTML(r,type){
     if(d.service) rows+='<div class="detail-row"><span class="detail-key">服务:</span><span>'+(d.service.status||'-')+' '+(d.service.reachable?'<span style="color:#22c55e">可达</span>':'<span style="color:#ef4444">不可达</span>')+(d.service.cf_detected?' <span style="color:#ef4444">CF:'+esc(d.service.cf_type||'detected')+'</span>':'')+'</span></div>';
     else if(d.chat) rows+='<div class="detail-row"><span class="detail-key">首页:</span><span>'+(d.chat.status||'-')+(d.chat.cf_detected?' <span style="color:#ef4444">CF:'+esc(d.chat.cf_type||'detected')+'</span>':'')+'</span></div>';
     if(d.api) rows+='<div class="detail-row"><span class="detail-key">API域名:</span><span>'+(d.api.status||'-')+' '+(d.api.reachable?'<span style="color:#22c55e">可达</span>':'<span style="color:#ef4444">不可达</span>')+'</span></div>';
-    if(d.ip_info) rows+='<div class="detail-row"><span class="detail-key">IP信息:</span><span>'+esc(d.ip_info.org||'')+' ('+esc(d.ip_info.country||'')+')</span></div>';
+    if(d.ip_info) {
+      var riskText = '';
+      if(d.ip_info.fraud_score!==undefined) {
+        var score = d.ip_info.fraud_score;
+        var rLevel = d.ip_info.risk_level || 'clean';
+        var rColor = score >= 70 ? '#ef4444' : score >= 40 ? '#f59e0b' : score >= 20 ? '#3b82f6' : '#22c55e';
+        riskText = ' <span style="color:'+rColor+';font-weight:bold">（风控值: '+score+'，风险: '+esc(rLevel)+'）</span>';
+        if (d.ip_info.fraud_flags && d.ip_info.fraud_flags.length > 0) {
+          riskText += ' <span style="color:#aaa;font-size:10px">['+esc(d.ip_info.fraud_flags.join(', '))+']</span>';
+        }
+        if (d.ip_info.blacklist_count > 0) {
+          riskText += ' <span style="color:#ef4444;font-size:10px">(黑名单: '+d.ip_info.blacklist_count+')</span>';
+        }
+      }
+      rows+='<div class="detail-row"><span class="detail-key">IP信息:</span><span>'+esc(d.ip_info.org||'')+' ('+esc(d.ip_info.country||'')+')'+riskText+'</span></div>';
+    }
     if(r.cf_indicators && r.cf_indicators.length>0) rows+='<div class="detail-row"><span class="detail-key">CF特征:</span><span style="color:#ef4444">'+esc(r.cf_indicators.join(', '))+'</span></div>';
     detailHTML='<div class="detail-panel" id="'+detailId+'">'+rows+'</div>';
   }
@@ -1220,6 +1241,12 @@ function compactRepoItem(p){
   if(p.ip)item.ip=p.ip;
   if(p.country)item.country=String(p.country).toUpperCase();
   if(p.ip_type)item.ip_type=p.ip_type;
+  if(p.fraud_score!==undefined&&p.fraud_score!==null)item.fraud_score=p.fraud_score;
+  if(p.clean_score!==undefined&&p.clean_score!==null)item.clean_score=p.clean_score;
+  if(p.risk_level)item.risk_level=p.risk_level;
+  if(p.fraud_flags)item.fraud_flags=p.fraud_flags;
+  if(p.blacklist_count!==undefined&&p.blacklist_count!==null)item.blacklist_count=p.blacklist_count;
+  if(p.checks_detail)item.checks_detail=p.checks_detail;
   if(p.service_reachable===true)item.service_reachable=true;
   if(p.api_reachable===true)item.api_reachable=true;
   if(p.cf_bypass)item.cf_bypass=true;
@@ -2119,8 +2146,11 @@ function repoPassesFilter(p,f){
   if(f==='service')return p.service_reachable===true;
   if(f==='api')return p.api_reachable===true;
   if(f==='cf')return !!p.cf_bypass;
-  if(f==='dc')return p.ip_type==='datacenter';
+  if(f==='dc')return p.ip_type==='datacenter' || p.ip_type==='hosting';
   if(f==='res')return p.ip_type==='residential';
+  if(f==='mobile')return p.ip_type==='mobile';
+  if(f==='proxy')return p.ip_type==='proxy';
+  if(f==='tor')return p.ip_type==='tor';
   if(f==='country')return !!country;
   return true;
 }
@@ -2163,7 +2193,11 @@ function renderRepo(){
       (p.service_reachable===true?tagHTML('tag-ok','服务可达',tagTitle('service_ok')):'')+
       (p.api_reachable===true?tagHTML('tag-ok','API域名可达',tagTitle('api_ok')):'')+
       (country?tagHTML('tag-country','国家: '+esc(country),tagTitle('country')):'')+
-      (p.ip_type==='datacenter'?tagHTML('tag-dc','机房',getIpTypeTitle(p.ip_type)):p.ip_type==='residential'?tagHTML('tag-res','住宅',getIpTypeTitle(p.ip_type)):'')+
+      (p.ip_type==='datacenter'||p.ip_type==='hosting'?tagHTML('tag-dc','机房',getIpTypeTitle(p.ip_type)):
+       p.ip_type==='residential'?tagHTML('tag-res','住宅',getIpTypeTitle(p.ip_type)):
+       p.ip_type==='mobile'?tagHTML('tag-mobile','移动',getIpTypeTitle(p.ip_type)):
+       p.ip_type==='proxy'?tagHTML('tag-proxy','代理',getIpTypeTitle(p.ip_type)):
+       p.ip_type==='tor'?tagHTML('tag-tor','Tor',getIpTypeTitle(p.ip_type)):'')+
       (p.cf_bypass?tagHTML('tag-cf','网页CF未拦截',tagTitle('cf_ok')):'')+
       '</div></div>'+
       '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">'+
