@@ -62,7 +62,8 @@ var targetProfiles=[
   {id:'gemini',name:'Gemini 检测',has_api:true,has_signup:false,has_cf_detection:false},
   {id:'claude',name:'Claude 检测',has_api:true,has_signup:false,has_cf_detection:true},
   {id:'github',name:'GitHub 检测',has_api:true,has_signup:false,has_cf_detection:false},
-  {id:'gitlab',name:'GitLab 检测',has_api:true,has_signup:false,has_cf_detection:false}
+  {id:'gitlab',name:'GitLab 检测',has_api:true,has_signup:false,has_cf_detection:false},
+  {id:'notion',name:'Notion 检测',has_api:true,has_signup:false,has_cf_detection:false}
 ];
 var currentTargetProfile=localStorage.getItem(TARGET_PROFILE_KEY)||'generic';
 

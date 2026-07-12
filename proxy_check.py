@@ -26,6 +26,8 @@ DEFAULT_GITHUB_TARGET = "https://github.com/"
 DEFAULT_GITHUB_API = "https://api.github.com/"
 DEFAULT_GITLAB_TARGET = "https://gitlab.com/"
 DEFAULT_GITLAB_API = "https://gitlab.com/api/v4/user"
+DEFAULT_NOTION_TARGET = "https://www.notion.so/"
+DEFAULT_NOTION_API = "https://api.notion.com/v1/users"
 DEFAULT_IP_TARGETS = ("https://httpbin.org/ip", "https://api.ipify.org?format=json")
 DEFAULT_IP_INFO_TARGETS = (
     "http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,isp,org,as,query,hosting,proxy",
@@ -134,6 +136,14 @@ TARGET_PROFILES: Dict[str, TargetProfile] = {
         service_url=DEFAULT_GITLAB_TARGET,
         api_url=DEFAULT_GITLAB_API,
         service_indicators=("gitlab.com", "GitLab", "gitlab"),
+    ),
+    "notion": TargetProfile(
+        id="notion",
+        name="Notion 检测",
+        service_url=DEFAULT_NOTION_TARGET,
+        api_url=DEFAULT_NOTION_API,
+        service_indicators=("notion", "workspace"),
+        api_ok_statuses=(200, 400, 401, 403, 404),
     ),
 }
 
