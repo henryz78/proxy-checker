@@ -268,22 +268,56 @@ class ProxyCheckEngine:
         target_profile: Optional[str] = None,
     ) -> None:
         profile = self._get_profile(target_profile)
-        semaphore = asyncio.Semaphore(max_concurrent)
+        worker_count = max(1, min(max_concurrent, len(proxies))) if proxies else 0
+        proxy_timeout = self._single_proxy_timeout(rounds)
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        for proxy in proxies:
+            queue.put_nowait(proxy)
+
         async with cffi_requests.AsyncSession(
             max_clients=max_concurrent,
             impersonate=self.config.impersonate,
         ) as session:
-            async def check_one(proxy: str) -> None:
-                if _is_stopped(stop_event):
-                    return
-                async with semaphore:
+            async def check_one(proxy: str) -> Optional[Dict[str, object]]:
+                try:
+                    return await asyncio.wait_for(
+                        self.check_proxy_full_async(proxy, session, stop_event, rounds, profile.id),
+                        timeout=proxy_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    return _failure_result(proxy, rounds, profile, f"单个代理检测超过 {proxy_timeout} 秒，已跳过")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    return _failure_result(proxy, rounds, profile, classify_error(str(exc)))
+
+            async def worker() -> None:
+                while not _is_stopped(stop_event):
+                    try:
+                        proxy = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        return
                     if _is_stopped(stop_event):
                         return
-                    result = await self.check_proxy_full_async(proxy, session, stop_event, rounds, profile.id)
+                    result = await check_one(proxy)
                     if result is not None:
                         on_result(result)
 
-            await asyncio.gather(*(check_one(proxy) for proxy in proxies))
+            tasks = [asyncio.create_task(worker()) for _ in range(worker_count)]
+            while tasks:
+                if _is_stopped(stop_event):
+                    await _cancel_tasks(tasks)
+                    return
+                pending = [task for task in tasks if not task.done()]
+                if not pending:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    return
+                tasks = pending
+                await asyncio.sleep(0.25)
+
+    def _single_proxy_timeout(self, rounds: int) -> int:
+        expected_round_budget = rounds * (self.config.timeout + self.config.detect_timeout)
+        return max(30, min(90, expected_round_budget + 10))
 
     def check_proxy_full(
         self,
@@ -752,36 +786,7 @@ class ProxyCheckEngine:
         return TARGET_PROFILES.get(profile_id, TARGET_PROFILES[DEFAULT_TARGET_PROFILE])
 
     def _protocol_failure(self, original: str, rounds: int, profile: TargetProfile) -> Dict[str, object]:
-        return {
-            "proxy": original,
-            "original": original,
-            "valid": False,
-            "unstable": False,
-            "grade": "F",
-            "checks_passed": 0,
-            "checks_total": rounds,
-            "error": "所有协议均不可用(HTTP/HTTPS/SOCKS4/SOCKS5/SOCKS5H)",
-            "latency": None,
-            "status_code": None,
-            "ip": None,
-            "country": None,
-            "ip_type": None,
-            "base_reachable": False,
-            "service_reachable": False,
-            "api_reachable": None,
-            "cf_bypass": False,
-            "cf_challenge": False,
-            "cf_challenge_type": None,
-            "cf_indicators": [],
-            "registration_ready": False,
-            "registration_detail": None,
-            "recommended_use": "invalid",
-            "detected_protocol": None,
-            "target_profile": profile.id,
-            "target_name": profile.name,
-            "timestamp": time.time(),
-            "checks_detail": {},
-        }
+        return _failure_result(original, rounds, profile, "所有协议均不可用(HTTP/HTTPS/SOCKS4/SOCKS5/SOCKS5H)")
 
 
 def _apply_service_response(result: RoundResult, profile: TargetProfile, response: object) -> bool:
@@ -1346,6 +1351,51 @@ def _build_public_result(
     }
 
 
+def _failure_result(original: str, rounds: int, profile: TargetProfile, error: str) -> Dict[str, object]:
+    return {
+        "proxy": original,
+        "original": original,
+        "valid": False,
+        "unstable": False,
+        "grade": "F",
+        "checks_passed": 0,
+        "checks_total": rounds,
+        "error": error,
+        "latency": None,
+        "status_code": None,
+        "ip": None,
+        "country": None,
+        "ip_type": None,
+        "base_reachable": False,
+        "service_reachable": False,
+        "api_reachable": None,
+        "cf_bypass": False,
+        "cf_challenge": False,
+        "cf_challenge_type": None,
+        "cf_indicators": [],
+        "registration_ready": False,
+        "registration_detail": None,
+        "recommended_use": "invalid",
+        "detected_protocol": None,
+        "target_profile": profile.id,
+        "target_name": profile.name,
+        "timestamp": time.time(),
+        "checks_detail": {
+            "summary": {
+                "target_profile": profile.id,
+                "target_name": profile.name,
+                "recommended_use": "invalid",
+            },
+            "targets": {
+                "profile": profile.id,
+                "name": profile.name,
+                "service": profile.service_url,
+                "api": profile.api_url,
+            },
+        },
+    }
+
+
 def _result_score(result: RoundResult) -> Tuple[int, int, int, int, int]:
     latency = result.latency if result.latency is not None else 999999
     return (
@@ -1373,6 +1423,19 @@ def _summary_error(summary: ScoreSummary, result: RoundResult) -> Optional[str]:
 
 def _is_stopped(stop_event: Optional[StopEvent]) -> bool:
     return bool(stop_event and stop_event.is_set())
+
+
+async def _cancel_tasks(tasks: Sequence[asyncio.Task[object]]) -> None:
+    pending = [task for task in tasks if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        _, still_pending = await asyncio.wait(pending, timeout=2)
+        for task in still_pending:
+            task.cancel()
+    done = [task for task in tasks if task.done()]
+    if done:
+        await asyncio.gather(*done, return_exceptions=True)
 
 
 def _extract_ip(value: object) -> Optional[str]:

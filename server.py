@@ -1108,6 +1108,7 @@ def build_auto_summary(runtime, status, error=None, repo_summary=None):
         "skipped": runtime.get("skipped", 0),
         "total": runtime.get("total", 0),
         "done": runtime.get("done", 0),
+        "last_progress_at": runtime.get("last_progress_at"),
         "valid_count": valid,
         "unstable_count": unstable,
         "invalid_count": invalid,
@@ -1261,6 +1262,7 @@ def publish_auto_result(token, result):
             return
         runtime["results"].append(result)
         runtime["done"] = runtime.get("done", 0) + 1
+        runtime["last_progress_at"] = time.time()
 
 
 def start_auto_run(token, reason="schedule"):
@@ -1303,6 +1305,7 @@ def start_auto_run(token, reason="schedule"):
             "results": [],
             "done": 0,
             "total": 0,
+            "last_progress_at": started_at,
             "finished": False,
             "target_profile": config["target_profile"],
             "rounds": config["rounds"],

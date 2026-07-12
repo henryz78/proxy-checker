@@ -1854,7 +1854,12 @@ function syncRepoReplace(repo,baseCount,callback){
   });
 }
 
-function loadRepoFromServer(callback){
+function markRepoManuallyCleared(){
+  try{localStorage.setItem('repo_manually_cleared','1')}catch(e){}
+}
+
+function loadRepoFromServer(callback,options){
+  options=options||{};
   var token=getUserToken();
   function tryLoadJson(t,cb){
     var xhr=new XMLHttpRequest();
@@ -1895,6 +1900,17 @@ function loadRepoFromServer(callback){
           renderRepo();
           if(callback)callback(count);
     }else{
+      if(options.replaceEmpty){
+        saveRepo([],{sync:false});
+        rememberRepoSync(0);
+        renderRepo();
+        if(callback)callback(0);
+        return;
+      }
+      if(!options.fallbackDefault||token==='default'){
+        if(callback)callback(0);
+        return;
+      }
       tryLoadJson('default',function(count2,repo2){
         if(count2>0){
           saveRepo(repo2,{sync:false});
@@ -2258,13 +2274,21 @@ function recheckRepo(){
 
 function restoreRepoFromCloud(){
   if(!requireAuthenticatedUI())return;
+  document.getElementById('repoCloudDropdown').classList.remove('open');
   var local=loadRepo();
   if(local.length>0 && !confirm('清空本地仓库并从云端恢复？'))return;
-  try{localStorage.removeItem('repo_manually_cleared')}catch(e){}
+  saveRepo([],{sync:false});
+  rememberRepoSync(0);
+  renderRepo();
   loadRepoFromServer(function(count){
-    if(count>0) toast('已从云端恢复 '+count+' 个代理');
-    else toast('云端没有仓库数据');
-  });
+    if(count>0){
+      try{localStorage.removeItem('repo_manually_cleared')}catch(e){}
+      toast('已从云端恢复 '+count+' 个代理');
+    }else{
+      markRepoManuallyCleared();
+      toast('云端没有仓库数据，已清空本地仓库');
+    }
+  },{replaceEmpty:true});
 }
 
 function toggleRepoIO(){
@@ -2332,11 +2356,7 @@ function fetchCloudRepo(callback){
     xhr.send();
   }
   tryJson(token,function(repo){
-    if(repo.length||token==='default'){
-      callback(repo);
-      return;
-    }
-    tryJson('default',callback);
+    callback(repo);
   });
 }
 
@@ -2382,6 +2402,7 @@ function clearRepoByGrade(grade){
   document.getElementById('repoClearDropdown').classList.remove('open');
   var baseCount=getRepoBaseCount(repo);
   saveRepo(next,{sync:false});
+  if(grade==='ALL')markRepoManuallyCleared();
   renderRepo();
   syncRepoReplace(next,baseCount,function(err,res){
     if(err){toast('清空同步失败: '+err);return}
